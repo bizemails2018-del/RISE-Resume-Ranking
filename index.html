@@ -1,574 +1,270 @@
-require('dotenv').config();
-const express = require('express');
-const multer = require('multer');
-const Anthropic = require('@anthropic-ai/sdk');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// ‚îÄ‚îÄ‚îÄ Anthropic Client ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-});
-
-// ‚îÄ‚îÄ‚îÄ File Upload Config ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${file.originalname}`)
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB per file
-  fileFilter: (req, file, cb) => {
-    const allowed = /\.(pdf|doc|docx|txt)$/i;
-    if (allowed.test(file.originalname)) {
-      cb(null, true);
-    } else {
-      cb(null, false); // silently skip unsupported types
-    }
-  }
-});
-
-// ‚îÄ‚îÄ‚îÄ Data Persistence ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-function loadData(filename, defaults) {
-  const filepath = path.join(DATA_DIR, filename);
-  if (fs.existsSync(filepath)) {
-    try { return JSON.parse(fs.readFileSync(filepath, 'utf8')); }
-    catch (e) { return defaults; }
-  }
-  return defaults;
-}
-
-function saveData(filename, data) {
-  fs.writeFileSync(path.join(DATA_DIR, filename), JSON.stringify(data, null, 2));
-}
-
-// ‚îÄ‚îÄ‚îÄ Initial Data ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-const defaultRequisitions = {
-  "433": {
-    id: "433",
-    propertyName: "RISE Viera",
-    role: "Property Manager",
-    cityState: "Melbourne, FL",
-    jobTitle: "RISE Viera ‚Äì Job ID 433",
-    contextType: "55+"
-  },
-  "388": {
-    id: "388",
-    propertyName: "RISE St. Augustine",
-    role: "Property Manager",
-    cityState: "St. Augustine, FL",
-    jobTitle: "RISE St. Augustine ‚Äì Job ID 388",
-    contextType: "55+"
-  }
-};
-
-let requisitions = loadData('requisitions.json', defaultRequisitions);
-let narratives   = loadData('narratives.json', {});
-let results      = loadData('results.json', {});
-
-// Save defaults on first run
-if (!fs.existsSync(path.join(DATA_DIR, 'requisitions.json'))) {
-  saveData('requisitions.json', requisitions);
-}
-
-// ‚îÄ‚îÄ‚îÄ Middleware ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-app.use(express.static('public'));
-app.use(express.json({ limit: '10mb' }));
-
-// ‚îÄ‚îÄ‚îÄ Scoring Models ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-const SCORING_MODELS = {
-  '55plus-leaseup': {
-    id: '55plus-leaseup',
-    name: '55+ Active Adult ‚Äì Lease Up',
-    categories: [
-      { key: 'scopeAccountability', label: 'Scope & Accountability', max: 25 },
-      { key: 'financialOwnership',  label: 'Financial Ownership',    max: 20 },
-      { key: 'performanceImpact',   label: 'Performance Impact',     max: 20 },
-      { key: 'leadershipTeamDev',   label: 'Leadership & Team Dev.', max: 20 },
-      { key: 'contextMatch',        label: 'Context Match',          max: 15 },
-    ],
-    framework: `
-SCORING MODEL: 55+ Active Adult ‚Äì Lease Up (0‚Äì100 points)
-
-1. SCOPE & ACCOUNTABILITY (0‚Äì25 points)
-What level have they truly owned?
-- GM / PM full P&L ownership: 25 pts
-- Acting PM / strong APM: 18‚Äì22 pts
-- Leasing Manager only: 10‚Äì15 pts
-- Leasing Professional only: 0‚Äì8 pts
-Look for: "Owned property operations", "Responsible for budget/NOI", "Led team of X", unit counts (150+ vs 300+)
-RULE: No scope clarity ‚Üí cap at 15.
-
-2. FINANCIAL OWNERSHIP (0‚Äì20 points)
-Did they truly manage money?
-- Clear budget/NOI ownership + outcomes: 18‚Äì20 pts
-- Mentions budget involvement: 12‚Äì16 pts
-- No financial language: 0‚Äì8 pts
-Keywords: NOI, Budget, Variance, Forecast, CapEx, Delinquency, AR/AP, Expense control, Reforecast
-RULE: Any hard financial numbers = automatic bump.
-
-3. PERFORMANCE IMPACT (0‚Äì20 points)
-Did they move metrics?
-- Quantified results with before/after: 18‚Äì20 pts
-- General performance claims: 12‚Äì15 pts
-- No outcomes: 0‚Äì10 pts
-Look for: Occupancy changes, Lease-up stabilization, Delinquency reduction, Renewal % increase, Lead-to-lease improvements, Reputation score improvements
-RULE: No numbers on resume ‚Üí cap at 12.
-
-4. LEADERSHIP & TEAM DEVELOPMENT (0‚Äì20 points)
-Can they build and sustain a team?
-- Led team of 5+ with coaching/development: 18‚Äì20 pts
-- Supervised small team: 12‚Äì16 pts
-- Individual contributor: 0‚Äì10 pts
-Look for: Team size, Hiring/firing, Coaching, Cross-functional leadership, Culture building, Conflict resolution, Emotional Intelligence
-RULE: No team size listed ‚Üí cap at 14.
-
-5. CONTEXT MATCH (0‚Äì15 points)
-For 55+ Active Adult: Senior/active adult experience, hospitality language, community engagement
-For Lease-Up: New construction, pre-leasing, stabilization, marketing activation
-- Direct experience match: 13‚Äì15 pts
-- Adjacent experience: 8‚Äì12 pts
-- No relevant exposure: 0‚Äì7 pts
-
-AUTOMATIC PENALTIES:
-- Repeated <12-month stints (non-project): -5 to -10 pts
-- No PM systems listed (Entrata/Yardi/etc.): -3 to -5 pts
-- No unit counts listed: -3 pts
-- Inflated title without proof: -5 pts
-
-SCORE INTERPRETATION:
-90‚Äì100 ‚Üí TOP TIER ‚Äî Secondary Screening
-80‚Äì89  ‚Üí STRONG ‚Äî Secondary Screening
-65‚Äì79  ‚Üí MAYBE ‚Äî Secondary Screening
-50‚Äì64  ‚Üí POSSIBLE LOWER ROLE ‚Äî Consider for a different or lower-level role
-<50    ‚Üí DO NOT PURSUE`,
-    jsonScores: `"scores": {
-    "scopeAccountability": { "score": <0-25>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "financialOwnership":  { "score": <0-20>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "performanceImpact":   { "score": <0-20>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "leadershipTeamDev":   { "score": <0-20>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "contextMatch":        { "score": <0-15>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" }
-  }`
-  },
-
-  'btr-construction': {
-    id: 'btr-construction',
-    name: 'BTR ‚Äì Construction',
-    categories: [
-      { key: 'scopeAccountability',   label: 'Scope & Accountability',   max: 20 },
-      { key: 'financialOwnership',    label: 'Financial Ownership',       max: 15 },
-      { key: 'leaseUpPerformance',    label: 'Lease-Up Performance',      max: 30 },
-      { key: 'leadershipTeamBuild',   label: 'Leadership & Team Build',   max: 20 },
-      { key: 'constructionBTRContext',label: 'Construction/BTR Context',  max: 15 },
-    ],
-    framework: `
-SCORING MODEL: BTR ‚Äì Construction (0‚Äì100 points)
-This is a startup operator role ‚Äî not a lifestyle or stabilized asset role.
-What matters most: Lease-up velocity, construction coordination, team build from zero, financial control under pressure.
-
-1. SCOPE & ACCOUNTABILITY (0‚Äì20 points)
-- Led lease-up as GM/PM: 18‚Äì20 pts
-- APM / strong #2 in lease-up: 12‚Äì17 pts
-- No lease-up ownership: 0‚Äì11 pts
-Look for: PM/GM title, full operational ownership, lease-up responsibility, 150+ units, team oversight.
-RULE: No lease-up clarity ‚Üí cap at 11.
-
-2. FINANCIAL OWNERSHIP (0‚Äì15 points)
-Control burn rate during lease-up.
-- Owned full budget + reporting: 13‚Äì15 pts
-- Assisted / partial exposure: 8‚Äì12 pts
-- No financial depth: 0‚Äì7 pts
-Look for: Budget creation, forecasting, variance reporting, expense control, rent roll management.
-
-3. LEASE-UP PERFORMANCE IMPACT (0‚Äì30 points) ‚Üê MOST IMPORTANT
-- Clear lease-up wins with quantified results: 25‚Äì30 pts
-- Lease-up experience but limited metrics: 18‚Äì24 pts
-- Exposure but not ownership: 10‚Äì17 pts
-- No lease-up: 0‚Äì9 pts
-Look for: "Lease-up from 0%", stabilized in X months, pre-leasing strategy, concession management, occupancy growth metrics.
-RULE: Resume does not clearly state lease-up ‚Üí cap at 15.
-
-4. LEADERSHIP & TEAM BUILD (0‚Äì20 points)
-Must hire and build culture from scratch.
-- Built or rebuilt team successfully from zero: 18‚Äì20 pts
-- Managed existing team (not startup): 12‚Äì17 pts
-- Minimal team leadership: 0‚Äì11 pts
-Look for: Built teams, hired full staff, rebuilt underperforming teams, coaching, conflict resolution, Emotional Intelligence.
-
-5. CONSTRUCTION / BTR / STARTUP CONTEXT (0‚Äì15 points)
-- Direct construction-to-operations experience: 13‚Äì15 pts
-- Indirect exposure: 8‚Äì12 pts
-- No development coordination: 0‚Äì7 pts
-Look for: New construction handoff, punch walks, warranty claims, vendor coordination, development team partnership, BTR/SFR knowledge.
-
-AUTOMATIC PENALTIES:
-- Repeated <12-month stints (non-project): -5 to -10 pts
-- No PM systems listed: -3 pts
-- No unit counts listed: -3 pts
-- No lease-up clarity: -5 pts
-
-SCORE INTERPRETATION:
-90‚Äì100 ‚Üí TOP TIER ‚Äî Secondary Screening
-80‚Äì89  ‚Üí STRONG ‚Äî Secondary Screening
-65‚Äì79  ‚Üí MAYBE ‚Äî Secondary Screening
-50‚Äì64  ‚Üí POSSIBLE LOWER ROLE ‚Äî Consider for a different or lower-level role
-<50    ‚Üí DO NOT PURSUE`,
-    jsonScores: `"scores": {
-    "scopeAccountability":    { "score": <0-20>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "financialOwnership":     { "score": <0-15>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "leaseUpPerformance":     { "score": <0-30>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "leadershipTeamBuild":    { "score": <0-20>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" },
-    "constructionBTRContext": { "score": <0-15>, "rationale": "1-2 sentences", "evidence": "direct quote or fact" }
-  }`
-  }
-};
-
-// ‚îÄ‚îÄ‚îÄ Candidate Profiles ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-const CANDIDATE_PROFILES = {
-  '55plus-leaseup': {
-    id: '55plus-leaseup',
-    name: '55+ Active Living ‚Äì Lease Up',
-    text: `The Candidate Who Already Runs the Place in Their Head
-
-Full P&L. Budget in one hand. Culture in the other. The kind of person who doesn't just know what NOI is ‚Äî they know which line item is quietly bleeding it every quarter and which service request backlog is about to turn into renewal fallout six months from now.
-
-When they say they "led a team," they don't mean they scheduled lunches and approved PTO. They mean:
-- They hired.
-- They coached.
-- They performance-managed.
-- They rebuilt a leasing team that was quietly sabotaging occupancy with inconsistent follow-up.
-- They turned a maintenance department from reactive ticket-closers into resident-facing relationship managers.
-
-You'll see it in their metrics: Occupancy didn't just go up ‚Äî it stabilized after turnover spikes. Delinquency didn't just drop ‚Äî it stayed down after rent increases. Renewals didn't just improve ‚Äî they correlated with service recovery SLAs they personally implemented. They talk in outcomes, not adjectives.
-
-They Treat Financials Like Resident Experience Data. Weak candidates separate "Operations" / "Finance" / "Customer Experience." Strong Active Adult PMs know those are the same conversation. They've reforecasted mid-year when vendor costs crept. They've defended CapEx tied to amenity usage trends. They've reduced bad debt by redesigning communication cadence ‚Äî not just enforcing policy.
-
-They know: Every missed work order is a future non-renewal. Every non-renewal is an acquisition cost problem. Every acquisition cost problem is an NOI problem.
-
-They Don't "Run Events." They Run Community Systems. If they've worked in 55+ or Active Adult before, you'll hear hospitality language show up naturally: Community engagement, Lifestyle programming, Resident councils, Service recovery, Reputation management. Because in Active Adult, the building doesn't succeed because of granite countertops. It succeeds because residents feel known, conflicts get mediated before they escalate, and loneliness gets noticed before it becomes move-out intent.
-
-This person has already handled: Interpersonal resident conflict, Family member escalations, Health-related accommodation conversations, Volunteer committees that think they run the building, Online reviews written at 11:42pm after book club ‚Äî and still protected the brand.
-
-They Can Scale People ‚Äî Not Just Fill Roles. You'll see they've led 5+ consistently. Not just assigned tasks ‚Äî developed successors. Assistant Managers promoted. Leasing Consultants cross-trained. Maintenance Supervisors looped into resident communication. Because they understand what you're building inside RISE University and your People & Talent Development model: The property isn't the system. The leadership pipeline is. And the PM is the node where onboarding, manager enablement, training readiness, retention risk and service culture either connect ‚Äî or silently fail.`
-  },
-  'btr-construction': {
-    id: 'btr-construction',
-    name: 'BTR ‚Äì Construction/Lease Up',
-    text: `The PM Who Opens Communities ‚Äî Not Just Runs Them
-
-They've stood in a leasing office with no rent roll, no trained staff, unfinished punch items, marketing spend already live, and an occupancy target that assumes nothing goes wrong ‚Äî and still hit velocity.
-
-They don't describe lease-ups as: "We grew occupancy." They say: "We stabilized from 0‚Äì92% in 11 months after cutting concessions in Phase 2 and shifting our conversion strategy from digital-first to appointment-driven once traffic normalized."
-
-Because they understand: Lease-up is math. Every unleased home carries operating cost, marketing cost, staffing cost, interest carry, and investor expectation. And every day it sits vacant is a financial decision.
-
-They Speak Construction ‚Äî Not Just Customer Service. They've walked punch lists, negotiated move-in timing around CO delays, chased warranty claims, partnered with development on phase release timing, and told marketing to hold traffic because the homes weren't actually ready. They know when to open the funnel, tighten concessions, delay move-ins, or throttle leasing velocity to avoid operational collapse. Weak Property Managers wait for construction updates. Strong BTR PMs ask: "If Phase 3 slips two weeks, what's our revised pre-lease strategy?"
-
-They Build Teams While the Plane Is Taking Off. They didn't inherit a leasing consultant ‚Äî they hired one, trained one, corrected one, replaced one. While answering resident complaints, warranty issues, vendor invoices, marketing leads, and development emails asking why absorption slowed. They've built maintenance from zero, leasing processes from scratch, daily reporting cadence, traffic tracking discipline, and CRM hygiene that actually supports forecasting. Because in lease-up: Bad follow-up is vacancy.
-
-They Protect the Budget While Growing Occupancy. They've forecasted mid-lease-up, defended staffing requests tied to absorption, managed concessions by phase, controlled expense creep during vendor onboarding, and protected rent roll growth without buying occupancy. They understand: Leasing velocity without expense discipline just moves the loss forward faster.
-
-Their Resume Says: "I've opened communities." "I stabilized in X months." "I built the team." "I partnered with construction." "I drove occupancy aggressively." Which is exactly what this asset type needs ‚Äî because this role isn't maintaining performance. It's manufacturing it.`
-  }
-};
-
-function buildScoringPrompt(job, narrative) {
-  // Select the scoring model ‚Äî fall back to 55plus-leaseup as default
-  const modelKey = job.scoringModel || '55plus-leaseup';
-  const model    = SCORING_MODELS[modelKey] || SCORING_MODELS['55plus-leaseup'];
-
-  // Build the candidate profile section
-  const profileKey  = job.candidateProfile;
-  const profileText = profileKey && CANDIDATE_PROFILES[profileKey]
-    ? CANDIDATE_PROFILES[profileKey].text
-    : null;
-
-  const profileSection = profileText
-    ? `IDEAL CANDIDATE PROFILE (selected by recruiting leadership):\n${profileText}\n`
-    : '';
-
-  const additionalSection = narrative
-    ? `ADDITIONAL ATTRIBUTES / CUSTOM NOTES:\n${narrative}\n`
-    : '';
-
-  return `You are a senior recruiting analyst evaluating a candidate for a ${job.role} role at ${job.propertyName} in ${job.cityState} (Job ID: ${job.id}).
-
-${model.framework}
-
-${profileSection}${additionalSection}
-INSTRUCTIONS:
-Analyze the resume carefully. Score using the framework above. Be precise ‚Äî justify every score with actual resume evidence.
-
-Return ONLY valid JSON with no additional text, markdown, or code blocks:
-
-{
-  "candidateName": "Full Name or Unknown",
-  "candidateEmail": "email or null",
-  "candidatePhone": "phone or null",
-  "currentTitle": "most recent job title",
-  "currentCompany": "most recent employer",
-  "yearsExperience": <number>,
-  "unitCounts": "largest property managed or null",
-  "pmSystems": ["list", "of", "systems"],
-  "scoringModel": "${modelKey}",
-  ${model.jsonScores},
-  "penalties": [{ "reason": "description", "deduction": <number> }],
-  "subtotal": <sum of category scores>,
-  "totalPenalties": <sum of deductions>,
-  "totalScore": <subtotal minus totalPenalties, min 0>,
-  "recommendation": "TOP TIER or STRONG or MAYBE or POSSIBLE LOWER ROLE or DO NOT PURSUE",
-  "recommendationLabel": "Secondary Screening or Secondary Screening or Secondary Screening or Possible Lower Role or Do Not Pursue",
-  "keyStrengths": ["strength 1", "strength 2", "strength 3"],
-  "keyGaps": ["gap 1", "gap 2"],
-  "fitSummary": "2-3 sentence narrative on fit for this role",
-  "narrativeAlignment": ${(profileText || narrative) ? '"1-2 sentences on alignment with the ideal candidate profile"' : 'null'}
-}`;
-}
-
-// ‚îÄ‚îÄ‚îÄ Analyze a single resume file ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-async function analyzeResumeFile(file, job, narrative) {
-  const fileBuffer = fs.readFileSync(file.path);
-  const ext = path.extname(file.originalname).toLowerCase();
-  const prompt = buildScoringPrompt(job, narrative);
-  let messageContent;
-
-  if (ext === '.pdf') {
-    const base64Data = fileBuffer.toString('base64');
-    messageContent = [
-      {
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: base64Data }
-      },
-      { type: 'text', text: prompt }
-    ];
-  } else if (ext === '.docx' || ext === '.doc') {
-    const mammoth = require('mammoth');
-    const { value: text } = await mammoth.extractRawText({ buffer: fileBuffer });
-    messageContent = [{ type: 'text', text: `RESUME CONTENT:\n\n${text}\n\n${prompt}` }];
-  } else {
-    // Plain text
-    const text = fileBuffer.toString('utf8');
-    messageContent = [{ type: 'text', text: `RESUME CONTENT:\n\n${text}\n\n${prompt}` }];
-  }
-
-  const response = await anthropic.messages.create({
-    model: 'claude-opus-4-6',
-    max_tokens: 2048,
-    temperature: 0,   // deterministic scoring ‚Äî same resume = same score every time
-    messages: [{ role: 'user', content: messageContent }]
-  });
-
-  const rawText = response.content[0].text.trim();
-
-  // Strip any markdown code fences if Claude wrapped the JSON
-  const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/i, '').trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in AI response');
-
-  const result = JSON.parse(jsonMatch[0]);
-  result.fileName   = file.originalname;
-  result.analyzedAt = new Date().toISOString();
-  result.id         = crypto.randomUUID();
-  return result;
-}
-
-// ‚îÄ‚îÄ‚îÄ API Routes ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-
-// GET scoring models (metadata only ‚Äî no full framework text)
-app.get('/api/scoring-models', (req, res) => {
-  res.json(Object.values(SCORING_MODELS).map(m => ({
-    id: m.id, name: m.name, categories: m.categories
-  })));
-});
-
-// GET candidate profiles (includes text for textarea population)
-app.get('/api/candidate-profiles', (req, res) => {
-  res.json(Object.values(CANDIDATE_PROFILES).map(p => ({
-    id: p.id, name: p.name, text: p.text
-  })));
-});
-
-// GET all requisitions
-app.get('/api/requisitions', (req, res) => {
-  res.json(Object.values(requisitions));
-});
-
-// PATCH requisition ‚Äî update scoringModel / candidateProfile
-app.patch('/api/requisitions/:id', (req, res) => {
-  const { id } = req.params;
-  if (!requisitions[id]) return res.status(404).json({ error: 'Requisition not found' });
-  const { scoringModel, candidateProfile } = req.body;
-  if (scoringModel    !== undefined) requisitions[id].scoringModel     = scoringModel    || null;
-  if (candidateProfile !== undefined) requisitions[id].candidateProfile = candidateProfile || null;
-  saveData('requisitions.json', requisitions);
-  res.json(requisitions[id]);
-});
-
-// POST new requisition
-app.post('/api/requisitions', (req, res) => {
-  const { propertyName, role, cityState, jobId, contextType } = req.body;
-  if (!propertyName || !role || !cityState || !jobId) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  if (requisitions[jobId]) {
-    return res.status(409).json({ error: 'Job ID already exists' });
-  }
-  const entry = {
-    id: jobId,
-    propertyName,
-    role,
-    cityState,
-    jobTitle: `${propertyName} ‚Äì Job ID ${jobId}`,
-    contextType: contextType || 'stabilized'
-  };
-  requisitions[jobId] = entry;
-  saveData('requisitions.json', requisitions);
-  res.json(entry);
-});
-
-// GET narrative
-app.get('/api/narrative/:jobId', (req, res) => {
-  res.json({ narrative: narratives[req.params.jobId] || '' });
-});
-
-// POST narrative
-app.post('/api/narrative/:jobId', (req, res) => {
-  narratives[req.params.jobId] = req.body.narrative || '';
-  saveData('narratives.json', narratives);
-  res.json({ success: true });
-});
-
-// GET results for a job
-app.get('/api/results/:jobId', (req, res) => {
-  res.json(results[req.params.jobId] || []);
-});
-
-// DELETE results for a job
-app.delete('/api/results/:jobId', (req, res) => {
-  delete results[req.params.jobId];
-  saveData('results.json', results);
-  res.json({ success: true });
-});
-
-// DELETE a single candidate result
-app.delete('/api/results/:jobId/:candidateId', (req, res) => {
-  const { jobId, candidateId } = req.params;
-  if (results[jobId]) {
-    results[jobId] = results[jobId].filter(r => r.id !== candidateId);
-    saveData('results.json', results);
-  }
-  res.json({ success: true });
-});
-
-// PATCH ‚Äî update candidate status (hire / pipeline / null)
-app.patch('/api/results/:jobId/:candidateId', (req, res) => {
-  const { jobId, candidateId } = req.params;
-  const { status } = req.body; // 'hire' | 'pipeline' | null
-  if (results[jobId]) {
-    const candidate = results[jobId].find(r => r.id === candidateId);
-    if (candidate) {
-      candidate.status = status || null;
-      saveData('results.json', results);
-      return res.json({ success: true, status: candidate.status });
-    }
-  }
-  res.status(404).json({ error: 'Candidate not found' });
-});
-
-// POST analyze resumes (SSE streaming)
-app.post('/api/analyze/:jobId', upload.array('resumes', 50), async (req, res) => {
-  const { jobId } = req.params;
-  const job = requisitions[jobId];
-
-  if (!job) {
-    return res.status(404).json({ error: 'Job requisition not found' });
-  }
-
-  const files = req.files || [];
-  if (files.length === 0) {
-    return res.status(400).json({ error: 'No supported files uploaded (PDF, DOCX, TXT)' });
-  }
-
-  // Set SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
-  const sendEvent = (data) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
-  const narrative = narratives[jobId] || '';
-  const analysisResults = [];
-  const errors = [];
-
-  // Keep-alive ping every 20s
-  const keepAlive = setInterval(() => {
-    res.write(':keepalive\n\n');
-  }, 20000);
-
-  try {
-    // Get existing filenames to avoid re-analyzing
-    const existing = results[jobId] || [];
-    const existingFileNames = new Set(existing.map(r => r.fileName));
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      sendEvent({ type: 'progress', current: i + 1, total: files.length, fileName: file.originalname });
-
-      if (existingFileNames.has(file.originalname)) {
-        sendEvent({ type: 'skipped', fileName: file.originalname, reason: 'Already analyzed' });
-        try { fs.unlinkSync(file.path); } catch (e) {}
-        continue;
-      }
-
-      try {
-        const result = await analyzeResumeFile(file, job, narrative);
-        analysisResults.push(result);
-        sendEvent({ type: 'result', result });
-      } catch (err) {
-        console.error(`Error analyzing ${file.originalname}:`, err.message);
-        errors.push({ fileName: file.originalname, error: err.message });
-        sendEvent({ type: 'error', fileName: file.originalname, error: err.message });
-      }
-
-      // Clean up temp file
-      try { fs.unlinkSync(file.path); } catch (e) {}
-    }
-
-    // Merge + sort all results
-    const merged = [...existing, ...analysisResults]
-      .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
-    results[jobId] = merged;
-    saveData('results.json', results);
-
-    sendEvent({ type: 'complete', newCount: analysisResults.length, errors });
-  } catch (err) {
-    console.error('Analysis error:', err);
-    sendEvent({ type: 'fatal', error: err.message });
-  } finally {
-    clearInterval(keepAlive);
-    res.end();
-  }
-});
-
-// ‚îÄ‚îÄ‚îÄ Start Server ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-app.listen(PORT, () => {
-  console.log(`\n‚úÖ RISE Resume Ranking running at http://localhost:${PORT}`);
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn('‚ö†Ô∏è  ANTHROPIC_API_KEY not set ‚Äî AI analysis will fail. Set it in a .env file.\n');
-  }
-});
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RISE Resume Ranking</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ‚îÄ‚îÄ HEADER ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="header-left">
+        <div class="logo-mark">R</div>
+        <div class="header-titles">
+          <h1 class="header-h1">RISE Resume Ranking</h1>
+          <span class="header-sub">AI-Powered Candidate Evaluation</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="view-as-group">
+          <label class="view-as-label">View As</label>
+          <select id="requisitionSelect" class="req-select">
+            <option value="">Select Job Requisition‚Ä¶</option>
+          </select>
+        </div>
+        <button class="btn btn-outline-white" id="addReqBtn">+ Add Requisition</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ‚îÄ‚îÄ EMPTY STATE ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ -->
+  <div id="emptyState" class="empty-state">
+    <div class="empty-inner">
+      <div class="empty-icon">üìã</div>
+      <h2>Select a Job Requisition</h2>
+      <p>Choose a requisition from the <strong>View As</strong> dropdown above to begin reviewing candidates.</p>
+    </div>
+  </div>
+
+  <!-- ‚îÄ‚îÄ MAIN CONTENT ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ -->
+  <main id="mainContent" class="main hidden">
+
+    <!-- Row 1: Job Details + Stats -->
+    <div class="grid g2 mb">
+
+      <div class="card">
+        <div class="card-hdr">
+          <span class="card-icon">üè¢</span>
+          <h3>Requisition Details</h3>
+        </div>
+        <div class="job-details">
+          <div class="jd-row">
+            <span class="jd-label">Property Name</span>
+            <span class="jd-val" id="dPropertyName">‚Äî</span>
+          </div>
+          <div class="jd-row">
+            <span class="jd-label">Role</span>
+            <span class="jd-val" id="dRole">‚Äî</span>
+          </div>
+          <div class="jd-row">
+            <span class="jd-label">City / State</span>
+            <span class="jd-val" id="dCityState">‚Äî</span>
+          </div>
+          <div class="jd-row">
+            <span class="jd-label">Job ID</span>
+            <span class="jd-val" id="dJobId">‚Äî</span>
+          </div>
+          <div class="jd-row">
+            <span class="jd-label">Context Type</span>
+            <span class="jd-val" id="dContextType">‚Äî</span>
+          </div>
+          <div class="jd-row jd-row-select">
+            <span class="jd-label">Scoring Model</span>
+            <select class="jd-select" id="scoringModelSelect">
+              <option value="">‚Äî Select Model ‚Äî</option>
+            </select>
+          </div>
+          <div class="jd-row jd-row-select">
+            <span class="jd-label">Candidate Profile</span>
+            <select class="jd-select" id="candidateProfileSelect">
+              <option value="">‚Äî Select Profile ‚Äî</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <span class="card-icon">üìä</span>
+          <h3>Analysis Summary</h3>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-num" id="sTotalCandidates">0</div>
+            <div class="stat-lbl">Total Candidates</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num green" id="sTopTier">0</div>
+            <div class="stat-lbl">Top Tier</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num blue" id="sStrong">0</div>
+            <div class="stat-lbl">Strong</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num amber" id="sMaybe">0</div>
+            <div class="stat-lbl">Maybe</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num orange" id="sPossibleLowerRole">0</div>
+            <div class="stat-lbl">Possible Lower Role</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num red" id="sDoNotPursue">0</div>
+            <div class="stat-lbl">Do Not Pursue</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Row 2: Additional Attributes -->
+    <div class="card mb">
+      <div class="card-hdr">
+        <span class="card-icon">‚úçÔ∏è</span>
+        <h3>Additional Attributes</h3>
+        <span class="card-subtitle">Supplement the selected Candidate Profile with role-specific notes, priorities, or deal-breakers.</span>
+      </div>
+      <textarea
+        id="narrativeTa"
+        class="narrative-ta"
+        rows="8"
+        placeholder="Add any additional attributes, deal-breakers, or custom notes here. This supplements the Candidate Profile selected above ‚Äî use it for property-specific priorities, unique cultural requirements, or anything not captured in the standard profile‚Ä¶"
+      ></textarea>
+      <div class="narrative-footer">
+        <span id="narrativeSavedMsg" class="saved-msg hidden">‚úì Saved</span>
+        <button class="btn btn-navy" id="saveNarrativeBtn">Save</button>
+      </div>
+    </div>
+
+    <!-- Row 3: Upload -->
+    <div class="card mb">
+      <div class="card-hdr">
+        <span class="card-icon">üìÑ</span>
+        <h3>Upload Resumes</h3>
+        <span class="card-subtitle">PDF, DOCX, or TXT ‚Äî upload as many as needed</span>
+      </div>
+
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept=".pdf,.doc,.docx,.txt" multiple hidden />
+        <div class="upload-zone-inner">
+          <div class="upload-arrow">‚¨Ü</div>
+          <p class="upload-primary">Drag &amp; drop resumes here</p>
+          <p class="upload-or">‚Äî or ‚Äî</p>
+          <button class="btn btn-secondary" id="browseBtn">Browse Files</button>
+          <p class="upload-types">PDF ¬∑ DOCX ¬∑ TXT accepted</p>
+        </div>
+      </div>
+
+      <div id="fileList" class="file-list hidden"></div>
+
+      <div class="upload-actions" id="uploadActions" style="display:none">
+        <button class="btn btn-outline-danger" id="clearFilesBtn">Remove All</button>
+        <button class="btn btn-primary" id="analyzeBtn">üîç Analyze Resumes</button>
+      </div>
+
+      <!-- Progress -->
+      <div id="progressWrap" class="progress-wrap hidden">
+        <div class="progress-meta">
+          <span id="progressLabel">Analyzing‚Ä¶</span>
+          <span id="progressCount">0 / 0</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill" style="width:0%"></div>
+        </div>
+        <div id="progressLog" class="progress-log"></div>
+      </div>
+    </div>
+
+    <!-- Row 4: Rankings -->
+    <div class="card" id="resultsCard">
+      <div class="card-hdr">
+        <span class="card-icon">üèÜ</span>
+        <h3>Candidate Rankings</h3>
+        <div class="card-hdr-actions">
+          <button class="btn btn-sm btn-outline" id="clearResultsBtn" style="display:none">Clear All Results</button>
+        </div>
+      </div>
+
+      <div id="resultsEmpty" class="results-empty">
+        <p>No candidates analyzed yet. Upload resumes and click <strong>Analyze Resumes</strong> to begin.</p>
+      </div>
+
+      <div id="resultsWrap" class="hidden">
+        <!-- Filter pills -->
+        <div class="filter-bar">
+          <button class="filter-pill active" data-filter="all">All</button>
+          <button class="filter-pill" data-filter="TOP TIER">üü¢ Top Tier</button>
+          <button class="filter-pill" data-filter="STRONG">üîµ Strong</button>
+          <button class="filter-pill" data-filter="MAYBE">üü° Maybe</button>
+          <button class="filter-pill" data-filter="POSSIBLE LOWER ROLE">üü† Possible Lower Role</button>
+          <button class="filter-pill" data-filter="DO NOT PURSUE">üî¥ Do Not Pursue</button>
+        </div>
+        <div id="candidateList"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ‚îÄ‚îÄ ADD REQUISITION MODAL ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ -->
+  <div id="addReqModal" class="modal hidden">
+    <div class="modal-overlay" id="addReqOverlay"></div>
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <h3>Add New Job Requisition</h3>
+        <button class="modal-x" id="addReqClose">‚úï</button>
+      </div>
+      <div class="modal-body">
+        <div class="fg">
+          <label class="fl">Property Name <span class="req-star">*</span></label>
+          <input type="text" class="fi" id="nPropertyName" placeholder="e.g., RISE Gainesville" />
+        </div>
+        <div class="fg">
+          <label class="fl">Role Being Posted <span class="req-star">*</span></label>
+          <input type="text" class="fi" id="nRole" placeholder="e.g., Property Manager" />
+        </div>
+        <div class="fg">
+          <label class="fl">City / State <span class="req-star">*</span></label>
+          <input type="text" class="fi" id="nCityState" placeholder="e.g., Gainesville, FL" />
+        </div>
+        <div class="fg">
+          <label class="fl">Job ID <span class="req-star">*</span></label>
+          <input type="text" class="fi" id="nJobId" placeholder="e.g., 512" />
+        </div>
+        <div class="fg">
+          <label class="fl">Context Type</label>
+          <select class="fi" id="nContextType">
+            <option value="55+">55+ / Active Adult</option>
+            <option value="lease-up">Lease-Up</option>
+            <option value="stabilized" selected>Stabilized Asset</option>
+          </select>
+        </div>
+        <div id="addReqError" class="form-error hidden"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" id="addReqCancel">Cancel</button>
+        <button class="btn btn-navy" id="addReqSave">Add Requisition</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ‚îÄ‚îÄ CANDIDATE DETAIL MODAL ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ -->
+  <div id="candidateModal" class="modal hidden">
+    <div class="modal-overlay" id="candidateOverlay"></div>
+    <div class="modal-box modal-lg">
+      <div class="modal-hdr">
+        <h3 id="candidateModalTitle">Candidate Analysis</h3>
+        <button class="modal-x" id="candidateModalClose">‚úï</button>
+      </div>
+      <div class="modal-body" id="candidateModalBody">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
